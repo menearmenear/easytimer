@@ -111,6 +111,7 @@ Panel {
 
   function commit(next) {
     root.now = Date.now()
+    next.updatedAt = root.now
     root.state = next
     stateFile.setText(Model.serializeState(next, root.now))
   }
@@ -189,6 +190,7 @@ Panel {
     property string labelText: ""
     property string fieldText: ""
     property string placeholderText: ""
+    property string fieldKey: ""
     readonly property bool editing: input.activeFocus
     signal committed(string value)
 
@@ -211,14 +213,27 @@ Panel {
       foreground: root.fg
       accent: Color.accent
       onEditingFinished: field.committed(text)
-      onActiveFocusChanged: if (activeFocus) selectAll()
+      onActiveFocusChanged: {
+        if (activeFocus) selectAll()
+        root.setFieldEditing(field.fieldKey, activeFocus)
+      }
     }
   }
 
-  readonly property bool editing:
-    iconFocusField.editing || iconBreakField.editing || iconPausedField.editing
-    || labelField.editing || breakLabelField.editing
-    || focusColorField.editing || breakColorField.editing || doneColorField.editing
+  // Fields report focus through this map so the key catcher can be blocked
+  // without forward references to items built later inside the panel.
+  property var editingFields: ({})
+  property bool editing: false
+
+  function setFieldEditing(key, value) {
+    var map = {}
+    for (var k in root.editingFields) map[k] = root.editingFields[k]
+    map[key] = value
+    root.editingFields = map
+    var any = false
+    for (var m in map) if (map[m]) { any = true; break }
+    root.editing = any
+  }
 
   // ---- Bar widget ---------------------------------------------------------
   implicitWidth: button.implicitWidth
@@ -731,6 +746,7 @@ Panel {
 
             LabelledField {
               id: iconFocusField
+              fieldKey: "iconFocus"
               labelText: strings.t("panel.setting.iconFocus")
               fieldText: root.config.iconFocus
               onCommitted: function(value) { root.setSetting("iconFocus", value) }
@@ -738,6 +754,7 @@ Panel {
 
             LabelledField {
               id: iconBreakField
+              fieldKey: "iconBreak"
               labelText: strings.t("panel.setting.iconBreak")
               fieldText: root.config.iconBreak
               onCommitted: function(value) { root.setSetting("iconBreak", value) }
@@ -745,6 +762,7 @@ Panel {
 
             LabelledField {
               id: iconPausedField
+              fieldKey: "iconPaused"
               labelText: strings.t("panel.setting.iconPaused")
               fieldText: root.config.iconPaused
               onCommitted: function(value) { root.setSetting("iconPaused", value) }
@@ -752,6 +770,7 @@ Panel {
 
             LabelledField {
               id: labelField
+              fieldKey: "label"
               labelText: strings.t("panel.setting.label")
               fieldText: root.config.label
               onCommitted: function(value) { root.setSetting("label", value) }
@@ -759,6 +778,7 @@ Panel {
 
             LabelledField {
               id: breakLabelField
+              fieldKey: "labelOnBreak"
               labelText: strings.t("panel.setting.labelOnBreak")
               fieldText: root.config.labelOnBreak
               onCommitted: function(value) { root.setSetting("labelOnBreak", value) }
@@ -766,6 +786,7 @@ Panel {
 
             LabelledField {
               id: focusColorField
+              fieldKey: "focusColor"
               labelText: strings.t("panel.setting.focusColor") + " (" + strings.t("panel.setting.colorHint") + ")"
               fieldText: root.config.focusColor
               placeholderText: "#a6adc8"
@@ -774,6 +795,7 @@ Panel {
 
             LabelledField {
               id: breakColorField
+              fieldKey: "breakColor"
               labelText: strings.t("panel.setting.breakColor") + " (" + strings.t("panel.setting.colorHint") + ")"
               fieldText: root.config.breakColor
               placeholderText: "#89b4fa"
@@ -782,6 +804,7 @@ Panel {
 
             LabelledField {
               id: doneColorField
+              fieldKey: "doneColor"
               labelText: strings.t("panel.setting.doneColor") + " (" + strings.t("panel.setting.colorHint") + ")"
               fieldText: root.config.doneColor
               placeholderText: "#f9e2af"
