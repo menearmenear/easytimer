@@ -177,7 +177,12 @@ Panel {
     function minutes(value: int): void { root.setMinutes(value) }
     function settingsToggle(): void { root.open(); root.settingsOpen = true }
     function status(): string {
-      return JSON.stringify({ state: root.state, settings: root.config })
+      var snapshot = {}
+      for (var k in root.state) snapshot[k] = root.state[k]
+      // The persisted state stores an end timestamp; report the live value so
+      // scripts reading `status` see the real countdown.
+      snapshot.remainingMs = Model.remainingMs(root.state, root.config, Date.now())
+      return JSON.stringify({ state: snapshot, settings: root.config })
     }
   }
 
