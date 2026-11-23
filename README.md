@@ -1,15 +1,16 @@
 # EasyTimer
 
-A fully customizable countdown / focus timer widget for the [Omarchy](https://omarchy.org/) shell (Quickshell bar). It shows a live countdown in the top bar and opens a mouse- and keyboard-driven panel with start, pause, reset, skip and a full settings editor.
+A simple, fully customizable countdown timer widget for the [Omarchy](https://omarchy.org/) shell (Quickshell bar). Set a length, start it, pause it, reset it. No modes, no phases, no rounds.
+
+The bar shows a live countdown (or percent / label / icon). Click the widget for a panel with Start/Pause, Reset, ±1 minute buttons and a settings editor.
 
 ## Features
 
-- Countdown in the bar: time, label + time, percent, label only, or icon only
-- Focus / short break / long break cycle with a configurable number of rounds
-- Editable durations (1–180 min focus, 1–60 min short break, 1–120 min long break)
-- Configurable glyphs, labels and colors — blank colors follow the live theme
-- Auto-start breaks and/or focus rounds
-- Desktop notification and chime on phase end, with adjustable chime volume
+- One duration, editable from 1 minute to 24 hours (1440 min)
+- Quick ±1 minute buttons in the panel; scroll on the bar widget also changes the length
+- Bar display: countdown, label + time, percent, label only, or icon only
+- Custom glyph, label and hex colors (blank colors follow the live theme)
+- End chime with volume, desktop notification toggle
 - Persists across shell restarts and shares one clock across all monitors
 - IPC for keybindings, menus and scripts
 - All panel strings ship as a flat JSON catalog (`i18n/en.json`) and follow the shell's selected language
@@ -21,9 +22,11 @@ omarchy plugin add https://github.com/menearmenear/easytimer.git --enable
 omarchy bar move menearmenear.easytimer --section centerEnd --index 0
 ```
 
-The widget id is `menearmenear.easytimer`. `defaultSection` is `centerEnd`, which is the right-hand side of the bar's center cluster (beside the clock). Move it with `omarchy bar move` if you prefer another spot.
+The widget id is `menearmenear.easytimer`. It lands in `centerEnd` — the right-hand side of the bar's center cluster, beside the clock.
 
 Update with `omarchy plugin update menearmenear.easytimer`; remove with `omarchy plugin remove menearmenear.easytimer`.
+
+Version 2 dropped focus/break modes and rounds. Old state files are read without issue; old `shell.json` keys that no longer exist are ignored.
 
 ## Controls
 
@@ -32,10 +35,9 @@ Update with `omarchy plugin update menearmenear.easytimer`; remove with `omarchy
 | Bar widget | left click | open / close the panel |
 | Bar widget | right click | start / pause |
 | Bar widget | middle click | reset |
-| Bar widget | scroll | change the current phase's length by ±1 min |
+| Bar widget | scroll | change the timer length by ±1 min |
 | Panel | `p` / `Space` / `Enter` | start / pause |
 | Panel | `r` | reset |
-| Panel | `s` | skip to the next phase |
 | Panel | `,` or `.` | toggle settings |
 | Panel | `Esc` | close |
 | Anywhere | see keybinding below | toggle the panel |
@@ -53,6 +55,7 @@ Optional Omarchy menu trigger in `~/.config/omarchy/extensions/omarchy-menu.json
 "trigger.easytimer.open": {"icon":"󰔟","label":"Open panel","action":"omarchy-shell menearmenear.easytimer open"},
 "trigger.easytimer.startpause": {"icon":"󰐊","label":"Start / Pause","action":"omarchy-shell menearmenear.easytimer startPause"},
 "trigger.easytimer.reset": {"icon":"󰜉","label":"Reset","action":"omarchy-shell menearmenear.easytimer reset"},
+"trigger.easytimer.10min": {"icon":"󰔟","label":"Set 10 minutes","action":"omarchy-shell menearmenear.easytimer minutes 10"}
 ```
 
 ## Settings
@@ -60,35 +63,33 @@ Optional Omarchy menu trigger in `~/.config/omarchy/extensions/omarchy-menu.json
 Settings live in the widget's entry in `~/.config/omarchy/shell.json` and are written through `updateEntryInline` when you use the panel. You can also edit them directly:
 
 ```bash
-omarchy bar set menearmenear.easytimer focusMinutes 30
+omarchy bar set menearmenear.easytimer minutes 90
 omarchy bar set menearmenear.easytimer barFormat countdown-label
-omarchy bar get menearmenear.easytimer focusMinutes
+omarchy bar get menearmenear.easytimer minutes
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
-| `focusMinutes` | 25 | Focus length, 1–180 |
-| `breakMinutes` | 5 | Short break length, 1–60 |
-| `longBreakMinutes` | 15 | Long break length, 1–120 |
-| `roundsBeforeLongBreak` | 4 | Focus rounds before a long break, 2–12 |
-| `autoStartBreaks` | true | Start breaks automatically |
-| `autoStartFocus` | false | Start the next focus round automatically |
-| `sound` | true | Chime when a phase ends |
+| `minutes` | 25 | Timer length, 1–1440 (24 h) |
+| `sound` | true | Chime when the timer ends |
 | `soundVolume` | 70 | Chime volume, 0–100 |
-| `notifications` | true | Desktop notification when a phase ends |
+| `notifications` | true | Desktop notification when the timer ends |
 | `showIcon` | true | Show a glyph in the bar |
-| `iconFocus` / `iconBreak` / `iconPaused` | `󰔟` / `󰅶` / `󰏤` | Nerd Font glyphs per state |
+| `glyph` / `glyphPaused` | `󰔟` / `󰏤` | Nerd Font glyphs |
 | `showLabel` | false | Show a custom word next to the timer |
-| `label` / `labelOnBreak` | `TIMER` / `BREAK` | Custom words |
+| `label` | `TIMER` | Custom word |
 | `barFormat` | `countdown` | `countdown`, `countdown-label`, `percent`, `label`, `icon` |
 | `timeFormat` | `auto` | `auto`, `always`, `never` (show hours) |
-| `focusColor` / `breakColor` / `doneColor` | `""` | Hex overrides, blank follows the theme |
+| `color` / `doneColor` | `""` | Hex overrides, blank follows the theme |
+
+Changing the length resets the timer to the new duration.
 
 ## IPC
 
 ```bash
 omarchy-shell menearmenear.easytimer open|close|toggle
-omarchy-shell menearmenear.easytimer start|pause|startPause|reset|skip
+omarchy-shell menearmenear.easytimer start|pause|startPause|reset
+omarchy-shell menearmenear.easytimer minutes 10
 omarchy-shell menearmenear.easytimer settingsToggle
 omarchy-shell menearmenear.easytimer status   # state + settings as JSON
 ```

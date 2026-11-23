@@ -4,50 +4,32 @@
 // values and returns plain values, so the math can be tested with any JS
 // runtime. The QML surface owns persistence, notifications and sound.
 
-var PHASES = ["focus", "break", "long"]
-var STATUSES = ["idle", "running", "paused", "ready"]
+var STATUSES = ["idle", "running", "paused", "done"]
 var FORMATS = ["countdown", "countdown-label", "percent", "label", "icon"]
 var TIME_FORMATS = ["auto", "always", "never"]
 
 var LIMITS = {
-  focusMinutes: { min: 1, max: 180 },
-  breakMinutes: { min: 1, max: 60 },
-  longBreakMinutes: { min: 1, max: 120 },
-  roundsBeforeLongBreak: { min: 2, max: 12 },
+  minutes: { min: 1, max: 1440 },
   soundVolume: { min: 0, max: 100 }
 }
 
-var BOOL_KEYS = [
-  "autoStartBreaks", "autoStartFocus", "sound", "notifications", "showIcon", "showLabel"
-]
-
-var STRING_KEYS = [
-  "iconFocus", "iconBreak", "iconPaused", "label", "labelOnBreak",
-  "focusColor", "breakColor", "doneColor"
-]
+var BOOL_KEYS = ["sound", "notifications", "showIcon", "showLabel"]
+var STRING_KEYS = ["glyph", "glyphPaused", "label", "color", "doneColor"]
 
 function defaultSettings() {
   return {
-    focusMinutes: 25,
-    breakMinutes: 5,
-    longBreakMinutes: 15,
-    roundsBeforeLongBreak: 4,
-    autoStartBreaks: true,
-    autoStartFocus: false,
+    minutes: 25,
     sound: true,
     soundVolume: 70,
     notifications: true,
     showIcon: true,
-    iconFocus: "󰔟",
-    iconBreak: "󰅶",
-    iconPaused: "󰏤",
+    glyph: "󰔟",
+    glyphPaused: "󰏤",
     showLabel: false,
     label: "TIMER",
-    labelOnBreak: "BREAK",
     barFormat: "countdown",
     timeFormat: "auto",
-    focusColor: "",
-    breakColor: "",
+    color: "",
     doneColor: ""
   }
 }
@@ -84,63 +66,56 @@ function normalizeSettings(raw) {
   for (var s = 0; s < STRING_KEYS.length; s++) {
     var stringKey = STRING_KEYS[s]
     if (raw[stringKey] === undefined || raw[stringKey] === null) continue
-    var max = (stringKey.indexOf("icon") === 0) ? 8 : 24
+    var max = stringKey.indexOf("glyph") === 0 ? 8 : 24
     out[stringKey] = String(raw[stringKey]).slice(0, max)
   }
-  out.focusColor = normalizeColor(raw.focusColor)
-  out.breakColor = normalizeColor(raw.breakColor)
+  out.color = normalizeColor(raw.color)
   out.doneColor = normalizeColor(raw.doneColor)
   if (FORMATS.indexOf(String(raw.barFormat)) >= 0) out.barFormat = String(raw.barFormat)
   if (TIME_FORMATS.indexOf(String(raw.timeFormat)) >= 0) out.timeFormat = String(raw.timeFormat)
   return out
 }
 
-// ---- Durations and state --------------------------------------------------
+// ---- State ----------------------------------------------------------------
 
-function phaseDurationMs(settings, phase) {
-  var minutes
-  if (phase === "break") minutes = settings.breakMinutes
-  else if (phase === "long") minutes = settings.longBreakMinutes
-  else minutes = settings.focusMinutes
-  return minutes * 60 * 1000
-}
-
-function phaseMinutes(settings, phase) {
-  return Math.round(phaseDurationMs(settings, phase) / 60000)
+function durationMs(settings) {
+  return settings.minutes * 60 * 1000
 }
 
 function initialState(settings) {
-  var duration = phaseDurationMs(settings, "focus")
+  var total = durationMs(settings)
   return {
-    phase: "focus",
     status: "idle",
     endAt: 0,
-    remainingMs: duration,
-    durationMs: duration,
-    roundsDone: 0,
+    remainingMs: total,
+    durationMs: total,
     updatedAt: 0
   }
 }
 
+// Tolerates state files written by older, mode-based versions of EasyTimer:
+// phase/rounds fields are simply ignored, the timing fields are reused.
 function parseState(text, settings) {
   var fallback = initialState(settings)
   if (!text) return fallback
   try {
     var raw = JSON.parse(text)
     if (!raw || typeof raw !== "object") return fallback
+    var rawStatus = String(raw.status || "")
+    var status = STATUSES.indexOf(rawStatus) >= 0 ? rawStatus : "idle"
+    if (rawStatus === "ready") status = "done"
+    var total = Math.max(0, Number(raw.durationMs) || 0)
+    if (total <= 0) total = durationMs(settings)
     var state = {
-      phase: PHASES.indexOf(raw.phase) >= 0 ? raw.phase : "focus",
-      status: STATUSES.indexOf(raw.status) >= 0 ? raw.status : "idle",
+      status: status,
       endAt: Number(raw.endAt) || 0,
       remainingMs: Math.max(0, Number(raw.remainingMs) || 0),
-      durationMs: Math.max(0, Number(raw.durationMs) || 0),
-      roundsDone: Math.max(0, parseInt(raw.roundsDone, 10) || 0),
+      durationMs: total,
       updatedAt: Number(raw.updatedAt) || 0
     }
     if (state.status === "running" && state.endAt <= 0) state.status = "idle"
-    if (state.durationMs <= 0) state.durationMs = phaseDurationMs(settings, state.phase)
-    if ((state.status === "idle" || state.status === "ready") && state.remainingMs <= 0)
-      state.remainingMs = state.durationMs
+    if (state.status === "idle") state.remainingMs = state.durationMs
+    if (state.status === "done") state.remainingMs = 0
     return state
   } catch (e) {
     return fallback
@@ -149,19 +124,18 @@ function parseState(text, settings) {
 
 function serializeState(state, now) {
   return JSON.stringify({
-    phase: state.phase,
     status: state.status,
     endAt: state.endAt,
     remainingMs: state.remainingMs,
     durationMs: state.durationMs,
-    roundsDone: state.roundsDone,
     updatedAt: now
   }, null, 2) + "\n"
 }
 
 function remainingMs(state, settings, now) {
   if (state.status === "running") return Math.max(0, state.endAt - now)
-  if (state.status === "idle" || state.status === "ready") return state.durationMs
+  if (state.status === "idle") return state.durationMs
+  if (state.status === "done") return 0
   return Math.max(0, state.remainingMs)
 }
 
@@ -170,19 +144,17 @@ function isExpired(state, now) {
 }
 
 function progress(state, settings, now) {
-  var total = state.durationMs > 0 ? state.durationMs : phaseDurationMs(settings, state.phase)
+  var total = state.durationMs > 0 ? state.durationMs : durationMs(settings)
   if (total <= 0) return 0
   return Math.max(0, Math.min(1, 1 - remainingMs(state, settings, now) / total))
 }
 
 function clone(state) {
   return {
-    phase: state.phase,
     status: state.status,
     endAt: state.endAt,
     remainingMs: state.remainingMs,
     durationMs: state.durationMs,
-    roundsDone: state.roundsDone,
     updatedAt: state.updatedAt
   }
 }
@@ -193,7 +165,7 @@ function start(state, settings, now) {
   var next = clone(state)
   if (next.status === "running") return next
   var remaining = remainingMs(next, settings, now)
-  if (remaining <= 0) remaining = phaseDurationMs(settings, next.phase)
+  if (remaining <= 0) remaining = durationMs(settings)
   next.status = "running"
   next.endAt = now + remaining
   next.remainingMs = remaining
@@ -218,56 +190,11 @@ function reset(state, settings) {
   return initialState(settings)
 }
 
-// Move to the phase after the current one. A focus round counts toward the
-// long break; finishing a long break starts a fresh cycle.
-function advance(state, settings) {
+function finish(state, settings) {
   var next = clone(state)
-  var rounds = next.roundsDone
-  var phase
-  if (next.phase === "focus") {
-    rounds += 1
-    phase = rounds >= settings.roundsBeforeLongBreak ? "long" : "break"
-  } else {
-    if (next.phase === "long") rounds = 0
-    phase = "focus"
-  }
-  next.phase = phase
-  next.roundsDone = rounds
-  next.status = "idle"
+  next.status = "done"
   next.endAt = 0
-  next.remainingMs = phaseDurationMs(settings, phase)
-  next.durationMs = next.remainingMs
-  return next
-}
-
-function wantsAutoStart(state, settings) {
-  return state.phase === "focus" ? settings.autoStartFocus : settings.autoStartBreaks
-}
-
-function finish(state, settings, now) {
-  var next = advance(state, settings)
-  if (wantsAutoStart(next, settings)) return start(next, settings, now)
-  next.status = "ready"
-  return next
-}
-
-function skip(state, settings, now) {
-  var elapsedRatio = 1 - remainingMs(state, settings, now) / phaseDurationMs(settings, state.phase)
-  var next
-  if (state.phase === "focus" && elapsedRatio < 0.1) {
-    // Abandoned almost immediately: switch to a break but do not count it.
-    next = clone(state)
-    next.phase = state.roundsDone + 1 >= settings.roundsBeforeLongBreak ? "long" : "break"
-    next.status = "idle"
-    next.endAt = 0
-    next.remainingMs = phaseDurationMs(settings, next.phase)
-    next.durationMs = next.remainingMs
-  } else {
-    next = advance(state, settings)
-  }
-  if (state.status === "running") return start(next, settings, now)
-  if (wantsAutoStart(next, settings)) return start(next, settings, now)
-  next.status = "ready"
+  next.remainingMs = 0
   return next
 }
 
@@ -286,53 +213,17 @@ function formatTime(ms, timeFormat) {
   return (showHours ? h + ":" : "") + pad(m) + ":" + pad(s)
 }
 
-function phaseKey(phase) {
-  if (phase === "break") return "break"
-  if (phase === "long") return "longBreak"
-  return "focus"
-}
-
-function labelFor(state, settings) {
-  return state.phase === "focus" ? settings.label : settings.labelOnBreak
-}
-
 function glyph(state, settings) {
-  if (state.status === "paused") return settings.iconPaused
-  if (state.phase !== "focus") return settings.iconBreak
-  return settings.iconFocus
+  return state.status === "paused" ? settings.glyphPaused : settings.glyph
 }
 
 function barText(state, settings, now) {
   var icon = settings.showIcon ? glyph(state, settings) + " " : ""
   if (settings.barFormat === "icon") return glyph(state, settings)
-  var label = labelFor(state, settings)
-  if (settings.barFormat === "label") return icon + label
+  if (settings.barFormat === "label") return icon + settings.label
   if (settings.barFormat === "percent")
     return icon + Math.round((1 - progress(state, settings, now)) * 100) + "%"
   var time = formatTime(remainingMs(state, settings, now), settings.timeFormat)
-  if (settings.barFormat === "countdown-label") return icon + label + " " + time
+  if (settings.barFormat === "countdown-label") return icon + settings.label + " " + time
   return icon + time
-}
-
-function roundsDots(state, settings) {
-  var dots = []
-  for (var i = 0; i < settings.roundsBeforeLongBreak; i++) {
-    dots.push({
-      done: i < state.roundsDone,
-      current: i === state.roundsDone && state.phase === "focus" && state.status !== "idle"
-    })
-  }
-  return dots
-}
-
-// Data for the end-of-phase notification; the QML layer fills in translated
-// strings from the plugin's i18n catalog.
-function notification(previousPhase, nextState, settings) {
-  return {
-    kind: previousPhase === "focus" ? "focusDone" : "breakDone",
-    nextPhase: phaseKey(nextState.phase),
-    minutes: phaseMinutes(settings, nextState.phase),
-    auto: wantsAutoStart(nextState, settings),
-    glyph: glyph(nextState, settings)
-  }
 }

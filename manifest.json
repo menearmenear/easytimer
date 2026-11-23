@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "menearmenear.easytimer",
   "name": "EasyTimer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "menearmenear",
   "license": "MIT",
-  "description": "A fully customizable countdown and focus timer for the Omarchy top bar",
+  "description": "A simple, fully customizable countdown timer for the Omarchy top bar",
   "kinds": [
     "bar-widget"
   ],
@@ -14,72 +14,36 @@
   },
   "barWidget": {
     "displayName": "EasyTimer",
-    "description": "Countdown / focus timer with a customizable bar label, durations, sounds and notifications",
+    "description": "One timer with an editable duration, customizable bar display, sound and notifications",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "centerEnd",
     "defaults": {
-      "focusMinutes": 25,
-      "breakMinutes": 5,
-      "longBreakMinutes": 15,
-      "roundsBeforeLongBreak": 4,
-      "autoStartBreaks": true,
-      "autoStartFocus": false,
+      "minutes": 25,
       "sound": true,
       "soundVolume": 70,
       "notifications": true,
       "showIcon": true,
-      "iconFocus": "󰔟",
-      "iconBreak": "󰅶",
-      "iconPaused": "󰏤",
+      "glyph": "󰔟",
+      "glyphPaused": "󰏤",
       "showLabel": false,
       "label": "TIMER",
-      "labelOnBreak": "BREAK",
       "barFormat": "countdown",
       "timeFormat": "auto",
-      "focusColor": "",
-      "breakColor": "",
+      "color": "",
       "doneColor": ""
     },
     "schema": [
       {
-        "key": "focusMinutes",
+        "key": "minutes",
         "type": "number",
-        "label": "Focus length (minutes)",
-        "description": "1-180"
-      },
-      {
-        "key": "breakMinutes",
-        "type": "number",
-        "label": "Short break length (minutes)",
-        "description": "1-60"
-      },
-      {
-        "key": "longBreakMinutes",
-        "type": "number",
-        "label": "Long break length (minutes)",
-        "description": "1-120"
-      },
-      {
-        "key": "roundsBeforeLongBreak",
-        "type": "number",
-        "label": "Rounds before a long break",
-        "description": "2-12"
-      },
-      {
-        "key": "autoStartBreaks",
-        "type": "boolean",
-        "label": "Auto-start breaks"
-      },
-      {
-        "key": "autoStartFocus",
-        "type": "boolean",
-        "label": "Auto-start the next focus round"
+        "label": "Timer length (minutes)",
+        "description": "1-1440 (24 hours)"
       },
       {
         "key": "sound",
         "type": "boolean",
-        "label": "Chime when a phase ends"
+        "label": "Chime when the timer ends"
       },
       {
         "key": "soundVolume",
@@ -89,7 +53,7 @@
       {
         "key": "notifications",
         "type": "boolean",
-        "label": "Desktop notification when a phase ends"
+        "label": "Desktop notification when the timer ends"
       },
       {
         "key": "showIcon",
@@ -97,22 +61,16 @@
         "label": "Show an icon in the bar"
       },
       {
-        "key": "iconFocus",
+        "key": "glyph",
         "type": "string",
-        "label": "Focus icon glyph",
-        "description": "Nerd Font glyph used during focus"
+        "label": "Timer icon glyph",
+        "description": "Nerd Font glyph shown while running"
       },
       {
-        "key": "iconBreak",
-        "type": "string",
-        "label": "Break icon glyph",
-        "description": "Nerd Font glyph used during breaks"
-      },
-      {
-        "key": "iconPaused",
+        "key": "glyphPaused",
         "type": "string",
         "label": "Paused icon glyph",
-        "description": "Nerd Font glyph used while paused"
+        "description": "Nerd Font glyph shown while paused"
       },
       {
         "key": "showLabel",
@@ -122,14 +80,8 @@
       {
         "key": "label",
         "type": "string",
-        "label": "Focus label",
-        "description": "Shown with countdown / percent formats"
-      },
-      {
-        "key": "labelOnBreak",
-        "type": "string",
-        "label": "Break label",
-        "description": "Shown with countdown / percent formats"
+        "label": "Bar label",
+        "description": "Shown with countdown-label / label formats"
       },
       {
         "key": "barFormat",
@@ -144,22 +96,16 @@
         "description": "auto | always | never (show hours)"
       },
       {
-        "key": "focusColor",
+        "key": "color",
         "type": "string",
-        "label": "Focus color",
+        "label": "Timer color",
         "description": "Hex color such as #a6adc8, blank follows the theme"
-      },
-      {
-        "key": "breakColor",
-        "type": "string",
-        "label": "Break color",
-        "description": "Hex color, blank follows the theme"
       },
       {
         "key": "doneColor",
         "type": "string",
-        "label": "Ready color",
-        "description": "Hex color for a finished phase, blank follows the theme"
+        "label": "Finished color",
+        "description": "Hex color when the timer finishes, blank follows the theme"
       }
     ]
   }

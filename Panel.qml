@@ -6,14 +6,13 @@ import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
-// EasyTimer: a bar label plus a keyboard/mouse popup for a countdown or focus
-// cycle. Every duration, glyph, label, color and behaviour toggle lives in the
-// widget's shell.json entry, so it can be edited here or through
-// `omarchy bar set menearmenear.easytimer <key> <value>`.
+// EasyTimer: one timer, one editable duration. The bar label and this popup
+// are fully configurable (format, glyph, label, colors, sound, notifications),
+// but there are no modes, phases or rounds.
 //
-// Runtime state is shared in ~/.local/state/omarchy/easytimer.json so the bar
-// instances on every monitor show the same clock. The primary-screen instance
-// ("leader") alone owns the notification and chime.
+// Runtime state is shared in ~/.local/state/omarchy/easytimer.json so every
+// monitor shows the same clock. The primary-screen instance ("leader") alone
+// owns the notification and chime.
 Panel {
   id: root
   moduleName: "menearmenear.easytimer"
@@ -44,7 +43,6 @@ Panel {
     merged = Model.normalizeSettings(merged)
     for (var m in merged) entry[m] = merged[m]
 
-    // React on this click; the shell.json write echoes the same value back.
     root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
@@ -58,33 +56,26 @@ Panel {
 
   function toggleSetting(key) { setSetting(key, !config[key]) }
 
-  function adjustSetting(key, delta) {
-    var next = Model.clampSetting(key, config[key] + delta)
-    if (next !== config[key]) setSetting(key, next)
+  function setMinutes(value) {
+    setSetting("minutes", Model.clampSetting("minutes", value))
   }
 
-  function adjustPhaseMinutes(delta) {
-    var key = state.phase === "focus" ? "focusMinutes"
-      : state.phase === "break" ? "breakMinutes" : "longBreakMinutes"
-    adjustSetting(key, delta)
-  }
+  function adjustMinutes(delta) { setMinutes(config.minutes + delta) }
 
   // ---- Runtime state ------------------------------------------------------
   property var state: Model.initialState(config)
   property real now: Date.now()
   property bool settingsOpen: false
   property real wheelAccumulator: 0
+  property bool stateLoaded: false
 
   readonly property int remaining: Model.remainingMs(state, config, now)
   readonly property real progress: Model.progress(state, config, now)
   readonly property bool running: state.status === "running"
   readonly property bool paused: state.status === "paused"
-  readonly property bool ready: state.status === "ready"
-  readonly property string phaseKey: Model.phaseKey(state.phase)
-  readonly property string phaseTitle: strings.t("panel.phase." + phaseKey)
+  readonly property bool done: state.status === "done"
   readonly property string statusTitle: strings.t("panel.status." + state.status)
   readonly property string barLabel: Model.barText(state, config, now)
-  readonly property var dots: Model.roundsDots(state, config)
 
   readonly property var hostWindow: QsWindow.window
   readonly property bool isLeader: {
@@ -93,9 +84,7 @@ Panel {
     return hostWindow.screen.name === screens[0].name
   }
 
-  readonly property color buttonForeground: state.phase === "focus"
-    ? (config.focusColor !== "" ? config.focusColor : fg)
-    : (config.breakColor !== "" ? config.breakColor : fg)
+  readonly property color buttonForeground: config.color !== "" ? config.color : fg
   readonly property color buttonUrgent: config.doneColor !== "" ? config.doneColor : urgent
 
   FileView {
@@ -105,8 +94,22 @@ Panel {
     atomicWrites: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: root.state = Model.parseState(text(), root.config)
-    onLoadFailed: root.state = Model.initialState(root.config)
+    onLoaded: {
+      root.state = Model.parseState(text(), root.config)
+      root.stateLoaded = true
+    }
+    onLoadFailed: {
+      root.state = Model.initialState(root.config)
+      root.stateLoaded = true
+    }
+  }
+
+  // A length change from the panel, `omarchy bar set`, or anywhere else
+  // resets the timer to the new duration. Color/glyph edits leave it alone.
+  onConfigChanged: {
+    if (!stateLoaded) return
+    if (Math.round(state.durationMs / 60000) !== config.minutes)
+      commit(Model.initialState({ minutes: config.minutes }))
   }
 
   function commit(next) {
@@ -120,21 +123,15 @@ Panel {
   function pauseTimer() { commit(Model.pause(state, Date.now())) }
   function toggleTimer() { commit(Model.togglePause(state, config, Date.now())) }
   function resetTimer() { commit(Model.reset(state, config)) }
-  function skipPhase() { commit(Model.skip(state, config, Date.now())) }
 
   function finishPhase() {
-    var previousPhase = state.phase
-    var next = Model.finish(state, config, Date.now())
-    commit(next)
+    commit(Model.finish(state, config))
     if (!isLeader) return
 
-    var note = Model.notification(previousPhase, next, config)
-    var nextName = strings.t("panel.phase." + note.nextPhase)
-    var title = strings.t("notify." + note.kind + ".title")
-    var body = strings.t("notify." + note.kind + ".body." + (note.auto ? "auto" : "manual"))
-      .arg(nextName).arg(note.minutes)
     if (config.notifications)
-      Util.execArgv(["omarchy-notification-send", "-g", note.glyph, title, body])
+      Util.execArgv(["omarchy-notification-send", "-g", config.glyph,
+        strings.t("notify.done.title"),
+        strings.t("notify.done.body").arg(config.minutes)])
     if (config.sound) chimeDelay.restart()
   }
 
@@ -177,14 +174,16 @@ Panel {
     function pause(): void { root.pauseTimer() }
     function startPause(): void { root.toggleTimer() }
     function reset(): void { root.resetTimer() }
-    function skip(): void { root.skipPhase() }
+    function minutes(value: int): void { root.setMinutes(value) }
     function settingsToggle(): void { root.open(); root.settingsOpen = true }
     function status(): string {
       return JSON.stringify({ state: root.state, settings: root.config })
     }
   }
 
-  // Reusable labeled input for the appearance section.
+  // Reusable labeled input for the appearance section. Fields report focus
+  // through a map so the key catcher never forwards references to items that
+  // are created later inside the panel.
   component LabelledField: Column {
     id: field
     property string labelText: ""
@@ -220,8 +219,6 @@ Panel {
     }
   }
 
-  // Fields report focus through this map so the key catcher can be blocked
-  // without forward references to items built later inside the panel.
   property var editingFields: ({})
   property bool editing: false
 
@@ -246,14 +243,13 @@ Panel {
     text: root.barLabel
     foreground: root.buttonForeground
     activeColor: root.buttonUrgent
-    active: root.ready
+    active: root.done
     dimmed: root.paused
     horizontalMargin: config.showIcon && config.barFormat !== "icon" ? 8.5 : 6.5
     centerFigures: config.barFormat !== "icon"
-    tooltipText: root.ready
-      ? strings.t("panel.status.ready")
-      : root.phaseTitle + " · " + root.statusTitle + " · "
-        + strings.t("panel.left").arg(Model.formatTime(root.remaining, config.timeFormat))
+    tooltipText: root.done
+      ? strings.t("panel.status.done")
+      : root.statusTitle + " · " + strings.t("panel.left").arg(Model.formatTime(root.remaining, config.timeFormat))
 
     onPressed: function(b) {
       if (b === Qt.RightButton) root.toggleTimer()
@@ -264,7 +260,7 @@ Panel {
     onWheelMoved: function(delta) {
       var wheel = Util.wheelSteps(root.wheelAccumulator, delta)
       root.wheelAccumulator = wheel.remainder
-      if (wheel.steps !== 0) root.adjustPhaseMinutes(wheel.steps)
+      if (wheel.steps !== 0) root.adjustMinutes(wheel.steps)
     }
   }
 
@@ -277,7 +273,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(1080))
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(1000))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -288,7 +284,6 @@ Panel {
       onTextKey: function(t) {
         if (t === "p") root.toggleTimer()
         else if (t === "r") root.resetTimer()
-        else if (t === "s") root.skipPhase()
         else if (t === "," || t === ".") root.settingsOpen = !root.settingsOpen
       }
 
@@ -309,17 +304,15 @@ Panel {
           PanelHero {
             width: parent.width
             title: strings.t("panel.title")
-            meta: root.phaseTitle + " · " + root.statusTitle
-            detail: strings.t("panel.round")
-              .arg(Math.min(root.state.roundsDone + (root.state.phase === "focus" ? 1 : 0), root.config.roundsBeforeLongBreak))
-              .arg(root.config.roundsBeforeLongBreak)
+            meta: root.statusTitle
+            detail: root.config.minutes + " " + strings.t("panel.minutes")
             foreground: root.fg
             fontFamily: root.ff
             iconComponent: Component {
               Text {
                 textFormat: Text.PlainText
                 text: Model.glyph(root.state, root.config)
-                color: root.ready ? root.buttonUrgent : root.buttonForeground
+                color: root.done ? root.buttonUrgent : root.buttonForeground
                 font.family: root.ff
                 font.pixelSize: Style.font.display
               }
@@ -345,7 +338,7 @@ Panel {
               textFormat: Text.PlainText
               anchors.horizontalCenter: parent.horizontalCenter
               text: Model.formatTime(root.remaining, root.config.timeFormat)
-              color: root.ready ? root.buttonUrgent : root.fg
+              color: root.done ? root.buttonUrgent : root.fg
               opacity: root.paused ? 0.55 : 1
               font.family: root.ff
               font.pixelSize: 54
@@ -365,48 +358,42 @@ Panel {
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                width: root.ready ? parent.width : parent.width * root.progress
+                width: root.done ? parent.width : parent.width * root.progress
                 radius: parent.radius
-                color: root.ready ? root.buttonUrgent : Color.accent
+                color: root.done ? root.buttonUrgent : Color.accent
                 Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.Linear } }
-              }
-            }
-
-            Row {
-              anchors.horizontalCenter: parent.horizontalCenter
-              spacing: Style.space(8)
-              Repeater {
-                model: root.dots
-                Rectangle {
-                  width: Style.space(10)
-                  height: Style.space(10)
-                  radius: Style.cornerRadius > 0 ? width / 2 : 0
-                  color: modelData.done ? root.fg : (modelData.current ? Color.accent : "transparent")
-                  border.width: modelData.done || modelData.current ? 0 : 1
-                  border.color: Util.alpha(root.fg, 0.4)
-                  Behavior on color { ColorAnimation { duration: 160 } }
-                }
               }
             }
 
             Text {
               textFormat: Text.PlainText
               anchors.horizontalCenter: parent.horizontalCenter
-              text: root.ready ? strings.t("panel.status.ready")
+              text: root.done ? strings.t("panel.status.done")
                 : root.running
                   ? strings.t("panel.endsAt").arg(Qt.formatTime(new Date(root.state.endAt), "HH:mm"))
                   : strings.t("panel.left").arg(Model.formatTime(root.remaining, root.config.timeFormat))
               color: Qt.darker(root.fg, 1.4)
               font.family: root.ff
               font.pixelSize: Style.font.caption
-              Behavior on color { ColorAnimation { duration: 160 } }
             }
           }
 
           // Controls --------------------------------------------------------
           Row {
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: Style.spacing.md
+            spacing: Style.spacing.sm
+
+            Button {
+              bordered: true
+              iconText: "󰍴"
+              text: "-1"
+              tooltipText: strings.t("panel.setting.minutes")
+              foreground: root.fg
+              fontFamily: root.ff
+              fontSize: Style.font.bodySmall
+              verticalPadding: Style.spacing.sm
+              onClicked: root.adjustMinutes(-1)
+            }
 
             Button {
               bordered: true
@@ -422,20 +409,23 @@ Panel {
 
             Button {
               bordered: true
+              iconText: "󰐕"
+              text: "+1"
+              tooltipText: strings.t("panel.setting.minutes")
+              foreground: root.fg
+              fontFamily: root.ff
+              fontSize: Style.font.bodySmall
+              verticalPadding: Style.spacing.sm
+              onClicked: root.adjustMinutes(1)
+            }
+
+            Button {
+              bordered: true
               iconText: "󰜉"
               text: strings.t("panel.button.reset")
               foreground: root.fg
               fontFamily: root.ff
               onClicked: root.resetTimer()
-            }
-
-            Button {
-              bordered: true
-              iconText: "󰒭"
-              text: strings.t("panel.button.skip")
-              foreground: root.fg
-              fontFamily: root.ff
-              onClicked: root.skipPhase()
             }
           }
 
@@ -493,63 +483,21 @@ Panel {
             spacing: Style.space(12)
 
             PanelSectionHeader {
-              text: strings.t("panel.section.durations")
+              text: strings.t("panel.section.timer")
               foreground: root.fg
               fontFamily: root.ff
             }
 
-            Grid {
-              width: parent.width
-              columns: 2
-              spacing: Style.space(10)
-
-              NumberField {
-                label: strings.t("panel.setting.focus") + " (" + strings.t("panel.minutes") + ")"
-                value: root.config.focusMinutes
-                from: Model.LIMITS.focusMinutes.min
-                to: Model.LIMITS.focusMinutes.max
-                fieldWidth: Style.space(96)
-                foreground: root.fg
-                accent: Color.accent
-                fontFamily: root.ff
-                onModified: root.setSetting("focusMinutes", value)
-              }
-
-              NumberField {
-                label: strings.t("panel.setting.break") + " (" + strings.t("panel.minutes") + ")"
-                value: root.config.breakMinutes
-                from: Model.LIMITS.breakMinutes.min
-                to: Model.LIMITS.breakMinutes.max
-                fieldWidth: Style.space(96)
-                foreground: root.fg
-                accent: Color.accent
-                fontFamily: root.ff
-                onModified: root.setSetting("breakMinutes", value)
-              }
-
-              NumberField {
-                label: strings.t("panel.setting.longBreak") + " (" + strings.t("panel.minutes") + ")"
-                value: root.config.longBreakMinutes
-                from: Model.LIMITS.longBreakMinutes.min
-                to: Model.LIMITS.longBreakMinutes.max
-                fieldWidth: Style.space(96)
-                foreground: root.fg
-                accent: Color.accent
-                fontFamily: root.ff
-                onModified: root.setSetting("longBreakMinutes", value)
-              }
-
-              NumberField {
-                label: strings.t("panel.setting.roundsBeforeLongBreak")
-                value: root.config.roundsBeforeLongBreak
-                from: Model.LIMITS.roundsBeforeLongBreak.min
-                to: Model.LIMITS.roundsBeforeLongBreak.max
-                fieldWidth: Style.space(96)
-                foreground: root.fg
-                accent: Color.accent
-                fontFamily: root.ff
-                onModified: root.setSetting("roundsBeforeLongBreak", value)
-              }
+            NumberField {
+              label: strings.t("panel.setting.minutes") + " (" + strings.t("panel.minutes") + ")"
+              value: root.config.minutes
+              from: Model.LIMITS.minutes.min
+              to: Model.LIMITS.minutes.max
+              fieldWidth: Style.space(110)
+              foreground: root.fg
+              accent: Color.accent
+              fontFamily: root.ff
+              onModified: root.setMinutes(value)
             }
 
             PanelSeparator { foreground: root.fg }
@@ -557,28 +505,6 @@ Panel {
               text: strings.t("panel.section.behaviour")
               foreground: root.fg
               fontFamily: root.ff
-            }
-
-            Toggle {
-              width: parent.width
-              label: strings.t("panel.setting.autoStartBreaks")
-              description: strings.t("panel.setting.autoStartBreaks.description")
-              checked: root.config.autoStartBreaks
-              foreground: root.fg
-              accent: Color.accent
-              fontFamily: root.ff
-              onClicked: root.toggleSetting("autoStartBreaks")
-            }
-
-            Toggle {
-              width: parent.width
-              label: strings.t("panel.setting.autoStartFocus")
-              description: strings.t("panel.setting.autoStartFocus.description")
-              checked: root.config.autoStartFocus
-              foreground: root.fg
-              accent: Color.accent
-              fontFamily: root.ff
-              onClicked: root.toggleSetting("autoStartFocus")
             }
 
             Toggle {
@@ -745,31 +671,20 @@ Panel {
             }
 
             LabelledField {
-              id: iconFocusField
-              fieldKey: "iconFocus"
-              labelText: strings.t("panel.setting.iconFocus")
-              fieldText: root.config.iconFocus
-              onCommitted: function(value) { root.setSetting("iconFocus", value) }
+              fieldKey: "glyph"
+              labelText: strings.t("panel.setting.glyph")
+              fieldText: root.config.glyph
+              onCommitted: function(value) { root.setSetting("glyph", value) }
             }
 
             LabelledField {
-              id: iconBreakField
-              fieldKey: "iconBreak"
-              labelText: strings.t("panel.setting.iconBreak")
-              fieldText: root.config.iconBreak
-              onCommitted: function(value) { root.setSetting("iconBreak", value) }
+              fieldKey: "glyphPaused"
+              labelText: strings.t("panel.setting.glyphPaused")
+              fieldText: root.config.glyphPaused
+              onCommitted: function(value) { root.setSetting("glyphPaused", value) }
             }
 
             LabelledField {
-              id: iconPausedField
-              fieldKey: "iconPaused"
-              labelText: strings.t("panel.setting.iconPaused")
-              fieldText: root.config.iconPaused
-              onCommitted: function(value) { root.setSetting("iconPaused", value) }
-            }
-
-            LabelledField {
-              id: labelField
               fieldKey: "label"
               labelText: strings.t("panel.setting.label")
               fieldText: root.config.label
@@ -777,33 +692,14 @@ Panel {
             }
 
             LabelledField {
-              id: breakLabelField
-              fieldKey: "labelOnBreak"
-              labelText: strings.t("panel.setting.labelOnBreak")
-              fieldText: root.config.labelOnBreak
-              onCommitted: function(value) { root.setSetting("labelOnBreak", value) }
-            }
-
-            LabelledField {
-              id: focusColorField
-              fieldKey: "focusColor"
-              labelText: strings.t("panel.setting.focusColor") + " (" + strings.t("panel.setting.colorHint") + ")"
-              fieldText: root.config.focusColor
+              fieldKey: "color"
+              labelText: strings.t("panel.setting.color") + " (" + strings.t("panel.setting.colorHint") + ")"
+              fieldText: root.config.color
               placeholderText: "#a6adc8"
-              onCommitted: function(value) { root.setSetting("focusColor", value) }
+              onCommitted: function(value) { root.setSetting("color", value) }
             }
 
             LabelledField {
-              id: breakColorField
-              fieldKey: "breakColor"
-              labelText: strings.t("panel.setting.breakColor") + " (" + strings.t("panel.setting.colorHint") + ")"
-              fieldText: root.config.breakColor
-              placeholderText: "#89b4fa"
-              onCommitted: function(value) { root.setSetting("breakColor", value) }
-            }
-
-            LabelledField {
-              id: doneColorField
               fieldKey: "doneColor"
               labelText: strings.t("panel.setting.doneColor") + " (" + strings.t("panel.setting.colorHint") + ")"
               fieldText: root.config.doneColor
