@@ -497,7 +497,7 @@ Panel {
               foreground: root.fg
               accent: Color.accent
               fontFamily: root.ff
-              onModified: root.setMinutes(value)
+              onModified: function(v) { root.setMinutes(v) }
             }
 
             PanelSeparator { foreground: root.fg }
